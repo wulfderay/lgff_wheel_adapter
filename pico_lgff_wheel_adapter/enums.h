@@ -2,14 +2,14 @@
 
 // output mode
 enum lg_wheel_output_type {
-  WHEEL_T_FGP,
-  WHEEL_T_FFGP,
-  WHEEL_T_DF,
-  WHEEL_T_DFP,
-  WHEEL_T_DFGT,
-  WHEEL_T_G25,
+  WHEEL_T_FGP, //WingMan Formula GP (no FFB)  
+  WHEEL_T_FFGP, //WingMan Formula Force GP (GT Force)
+  WHEEL_T_DF, //Driving Force
+  WHEEL_T_DFP, //Driving Force Pro
+  WHEEL_T_DFGT, //Driving Force GT
+  WHEEL_T_G25, 
   WHEEL_T_G27, //(need to test) endpoint size 16, interval 2
-  WHEEL_T_SFW,
+  WHEEL_T_SFW, //Speed Force Wireless
   WHEEL_T_MOMOFO,
   WHEEL_T_MOMORA, // logitech profiler puts the wheel in raw mode and this is not implemented here
 };

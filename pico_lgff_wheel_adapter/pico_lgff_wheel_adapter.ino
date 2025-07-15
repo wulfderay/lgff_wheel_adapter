@@ -26,9 +26,15 @@
 #include "enums.h"
 #include "wheel_ids.h"
 #include "wheel_commands.h"
+#include "input_mapper.h"
+#include "output_mapper.h"
 #include "config.h"
 #include "reports.h"
 #include "usb_descriptors.h"
+#include "led.h"
+
+// Define the output mode with default value
+lg_wheel_output_type output_mode = WHEEL_T_DEFAULT;
 
 // validation
 #if defined(EXTERNAL_PEDAL_TYPE) && (!defined(PEDAL_GAS) || !defined(PEDAL_BRAKE))
@@ -40,6 +46,7 @@
 #if F_CPU != 120000000 && F_CPU != 240000000
   #error PIO USB require CPU Speed must be 120 or 240 MHz
 #endif
+
 
 // USB Host object
 Adafruit_USBH_Host USBHost;
@@ -69,20 +76,11 @@ volatile uint8_t leds_buffer = { 0x00 };
 // report to hold input from any wheel
 generic_report_t generic_report;
 
-
-#ifdef BOARD_RGB_PIN
-  #include "src/Pico_WS2812/WS2812.hpp" //https://github.com/ForsakenNGS/Pico_WS2812
-  WS2812 ledStrip(
-      BOARD_RGB_PIN,      // Data line is connected to pin 0. (GP0)
-      1,                  // Strip is 1 LEDs long.
-      pio0,               // Use PIO 0 for creating the state machine.
-      3,                  // Index of the state machine that will be created for controlling the LED strip
-      WS2812::FORMAT_GRB  // Pixel format used by the LED strip
-  );
-#endif
+output_mapper_t output_report;
 
 // holds the device description
 tusb_desc_device_t desc;
+
 
 
 // persisted variables. got the idea from:
@@ -91,6 +89,7 @@ tusb_desc_device_t desc;
 #define PERSISTED_OUTPUT_MODE_VALID 0x3A2F
 static uint32_t __uninitialized_ram(persisted_output_mode);
 static uint32_t __uninitialized_ram(persisted_output_mode_valid);
+
 void reset_usb(void) {
   persisted_output_mode = output_mode;
   persisted_output_mode_valid = PERSISTED_OUTPUT_MODE_VALID;
@@ -100,139 +99,6 @@ void reboot(void) {
   watchdog_enable(1, false);
   for (;;) {
   }
-}
-
-
-// default report values
-// WingMan Formula GP
-fgp_report_t out_fgp_report {
-  .wheel = 0x7f,
-  .pedals = 0x7f,
-  .gasPedal = 0xff,
-  .brakePedal = 0xff,
-};
-
-// WingMan Formula Force GP (GT Force)
-ffgp_report_t out_ffgp_report {
-  .wheel = 0x7f,
-  .pedals = 0x7f,
-  .gasPedal = 0xff,
-  .brakePedal = 0xff,
-};
-
-//Driving Force
-df_report_t out_df_report {
-  .wheel = 0x7f,
-  //.pedal_connected = 1, // drivehub: clear. need to confirm from real a device
-  //.power_connected = 1, // drivehub: set. need to confirm from real a device
-  .pedals = 0x7f,
-  .hat = 0x08,
-  .calibated = 1, // drivehub: set
-  //.unknown = 1, // drivehub: set
-  .gasPedal = 0xff,
-  .brakePedal = 0xff
-};
-
-//Driving Force Pro (GT Force Pro)
-dfp_report_t out_dfp_report {
-  .wheel = 0x7f,
-  .hat = 0x08,
-  .pedals = 0x7f,
-  .gasPedal = 0xff,
-  .brakePedal = 0xff,
-  .pedal_connected = 1,
-  .power_connected = 1,
-  .calibated = 1,
-  .unknown = 1,
-};
-
-//Driving Force GT
-dfgt_report_t out_dfgt_report {
-  .hat = 0x08,
-  .pedal_connected = 1,
-  .power_connected = 1,
-  .calibated = 1,
-  .unknown = 0x5,
-  .wheel = 0x7f,
-  .gasPedal = 0xff,
-  .brakePedal = 0xff,
-};
-
-//G25 Racing Wheel
-g25_report_t out_g25_report {
-  .hat = 0x08,
-  .pedal_disconnected = 0,
-  .power_connected = 1,
-  .wheel = 0x7f,
-  .gasPedal = 0xff,
-  .brakePedal = 0xff,
-  .clutchPedal = 0xff,
-  .shifter_x = 0x80,
-  .shifter_y = 0x80,
-  .shifter = 1,
-  .unknown = 1
-};
-
-//G27 Racing Wheel
-g27_report_t out_g27_report {
-  .hat = 0x08,
-  .wheel = 0x7f,
-  .gasPedal = 0xff,
-  .brakePedal = 0xff,
-  .clutchPedal = 0xff,
-  .shifter_x = 0x80,
-  .shifter_y = 0x80,
-  .pedal_disconnected = 0,
-  .calibrated = 1,
-  .shifter_connected = 1,
-  .unknown = 1,
-};
-
-//Speed Force Wireless
-sfw_report_t out_sfw_report {
-  .wheel = 0x7f,
-  .connected = 1, // 0 when not connecded? or not paired?
-  .gasPedal = 0xff,
-  .brakePedal = 0xff
-};
-
-//Momo Force
-momofo_report_t out_momofo_report {
-  .wheel = 0x7f,
-  .pedals = 0x7f,
-  .gasPedal = 0xff,
-  .brakePedal = 0x00
-};
-
-//Momo Racing
-momora_report_t out_momora_report {
-  .wheel = 0x7f,
-  .pedals = 0x7f,
-  .gasPedal = 0xff,
-  .brakePedal = 0xff
-};
-
-void set_led(bool value) {
-  #ifdef LED_BUILTIN
-    gpio_put(LED_BUILTIN, value);
-  #endif
-}
-
-void reset_generic_report() {
-  memset(&generic_report, 0, sizeof(generic_report));
-  generic_report.hat = 0x08;
-  generic_report.wheel_8 = 0x7F;
-  generic_report.wheel_10 = 0x7F;
-  generic_report.wheel_14 = 0x7F;
-  generic_report.wheel_16 = 0x7F;
-  generic_report.gasPedal_8 = 0xFF;
-  generic_report.brakePedal_8 = 0xFF;
-  generic_report.clutchPedal_8 = 0xFF;
-  generic_report.gasPedal_16 = 0xFFFF;
-  generic_report.brakePedal_16 = 0xFFFF;
-  generic_report.clutchPedal_16 = 0xFFFF;
-  generic_report.shifter_x = 0x80;
-  generic_report.shifter_y = 0x80;
 }
 
 void handle_bcd_device(uint16_t vid, uint16_t pid, uint16_t bcdDevice) {
@@ -307,8 +173,6 @@ void handle_bcd_device(uint16_t vid, uint16_t pid, uint16_t bcdDevice) {
             change_mode_to = DFP;
           else if (output_mode == WHEEL_T_DFGT)
             change_mode_to = DFGT;
-          else if (output_mode == WHEEL_T_G25)
-            change_mode_to = G25;
           else if (output_mode == WHEEL_T_G27)
             change_mode_to = G27;
           break;
@@ -351,28 +215,14 @@ void handle_bcd_device(uint16_t vid, uint16_t pid, uint16_t bcdDevice) {
     }
   }
 
-  #ifdef BOARD_RGB_PIN
-    // set rgb led color. using this for debug
-    if (pid == pid_df)
-      ledStrip.fill( WS2812::RGB(20, 0, 0) ); //red
-    else if (pid == pid_dfp)
-      ledStrip.fill( WS2812::RGB(0, 20, 0) ); //green
-    else if (pid == pid_dfgt)
-      ledStrip.fill( WS2812::RGB(0, 0, 20) ); //blue
-    else if (pid == pid_g25)
-      ledStrip.fill( WS2812::RGB(20, 20, 0) ); //yellow
-    else if (pid == pid_g27)
-      ledStrip.fill( WS2812::RGB(20, 0, 20) ); //pink
-    else if (pid == pid_g29)
-      ledStrip.fill( WS2812::RGB(20, 20, 20) ); //white
-    ledStrip.show();
-  #endif
+  debug_led_strip(pid);
 
   // set next stage
   if (pid_sfw == pid)
     init_stage = CONFIGURING_DONGLE;
   else
     init_stage = SENDING_CMDS;
+  leds_display_val(init_stage);
 }
 
 // receive commands from host and keep them to pass to device later
@@ -383,7 +233,7 @@ void hid_set_report_callback(uint8_t report_id, hid_report_type_t report_type, u
   // autocentering command compatible with Formula Force EX 
 //  if(buffer[0] == 0xfe && buffer[1] == 0x03)
 //  {
-//    //set_led(HIGH);
+//    //set_led(LED_BUILTIN, HIGH);
 //    //return;
 //  }
 
@@ -537,7 +387,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t idx, uint8_t const* report_desc,
     wheel_supports_cmd = (pid != pid_fgp);
 
     init_stage = DISCONNECTED;
-
+    leds_display_val(init_stage);
     // Get Device Descriptor
 //    tuh_descriptor_get_device(dev_addr, &desc, 18, receive_device_descriptor, 0);
     tusb_desc_device_t desc_device;
@@ -550,7 +400,7 @@ void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t idx, uint8_t const* report_desc,
     }
       
     
-    //set_led(HIGH);
+    //set_led(LED_BUILTIN, HIGH);
     //tuh_hid_receive_report(dev_addr, idx);
   }
 }
@@ -564,16 +414,14 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t idx) {
     
     // set next stage
     init_stage = DISCONNECTED;
+    leds_display_val(init_stage);
     change_mode_to = NATIVE;
     
 //    tud_disconnect(); // disconnect to host
-    reset_generic_report();
+    reset_generic_report(&generic_report);
     
-    set_led(LOW);
-    #ifdef BOARD_RGB_PIN
-      ledStrip.fill( WS2812::RGB(0, 0, 0) );
-      ledStrip.show();
-    #endif
+    set_led(LED_BUILTIN, LOW);
+    clear_led_strip();
     
 //    persisted_output_mode_valid = 0x0;
 //    reboot();
@@ -585,10 +433,13 @@ void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t idx, uint8_t const* re
   // safe check
   if (len > 0 && dev_addr == wheel_addr && idx == wheel_idx) {
 
-    reset_generic_report();
+    reset_generic_report(&generic_report);
     
+    
+    uint16_t vid, pid;
+    tuh_vid_pid_get(wheel_addr, &vid, &pid);
     // map the received report to generic_output
-    map_input(report);
+    map_input(report, &generic_report, vid, pid);
 
 //    // now map the generic_output to the output_mode
 //    map_output();
@@ -612,6 +463,16 @@ void setup() {
     gpio_put(LED_BUILTIN, LOW);
   #endif
 
+  #ifdef LEDS_EXTRA
+    init_leds();
+    set_led(LED_BLUE, HIGH);
+    set_led(LED_RED, HIGH);
+    set_led(LED_YELLOW, HIGH);
+    delay(500);
+    set_led(LED_BLUE, LOW);
+    set_led(LED_RED, LOW);
+    set_led(LED_YELLOW, LOW);
+  #endif
   //using arduino code to keep it simple
   #ifdef EXTERNAL_PEDAL_TYPE
     pinMode(PEDAL_GAS, INPUT);
@@ -788,6 +649,7 @@ void loop() {
         }
       } else { 
         init_stage = SENDING_CMDS;
+        leds_display_val(init_stage);
       }
       last_millis = millis();
     }
@@ -852,9 +714,10 @@ void loop() {
         // no mode change was sent. wheel must be in native mode now. starts receiving inputs!
         if (change_mode_to == NATIVE) {
           init_stage = READY; // set next stage
-          set_led(LOW);
+          leds_display_val(init_stage);
+          set_led(LED_BUILTIN, LOW);
           delay(1000);
-          set_led(HIGH);
+          set_led(LED_BUILTIN, HIGH);
           tud_connect(); //connect to host
           // wait until device mounted
           while ( !TinyUSBDevice.mounted() ) delay(1);
@@ -896,48 +759,7 @@ void loop() {
     
     external_pedals_values = (external_brake_value << 8) | external_gas_value;
 
-//    if (external_pedals_updated) {
-//      switch (output_mode) {
-//        case WHEEL_T_FGP:
-//          out_fgp_report.gasPedal = external_gas_value;
-//          out_fgp_report.brakePedal = external_brake_value;
-//          out_fgp_report.pedals = (~(out_fgp_report.brakePedal>>1) - ~(out_fgp_report.gasPedal>>1)) + 0x7f;
-//          break;
-//        case WHEEL_T_FFGP:
-//          out_ffgp_report.gasPedal = external_gas_value;
-//          out_ffgp_report.brakePedal = external_brake_value;
-//          out_ffgp_report.pedals = (~(out_ffgp_report.brakePedal>>1) - ~(out_ffgp_report.gasPedal>>1)) + 0x7f;
-//          break;
-//        case WHEEL_T_DF:
-//          out_df_report.gasPedal = external_gas_value;
-//          out_df_report.brakePedal = external_brake_value;
-//          out_df_report.pedals = (~(out_df_report.brakePedal>>1) - ~(out_df_report.gasPedal>>1)) + 0x7f;
-//          break;
-//        case WHEEL_T_DFP:
-//          out_dfp_report.gasPedal = external_gas_value;
-//          out_dfp_report.brakePedal = external_brake_value;
-//          out_dfp_report.pedals = (~(out_dfp_report.brakePedal>>1) - ~(out_dfp_report.gasPedal>>1)) + 0x7f;
-//          break;
-//        case WHEEL_T_DFGT:
-//          out_dfgt_report.gasPedal = external_gas_value;
-//          out_dfgt_report.brakePedal = external_brake_value;
-//          break;
-//        case WHEEL_T_G25:
-//          out_g25_report.gasPedal = external_gas_value;
-//          out_g25_report.brakePedal = external_brake_value;
-//          break;
-//        case WHEEL_T_G27:
-//          out_g27_report.gasPedal = external_gas_value;
-//          out_g27_report.brakePedal = external_brake_value;
-//          break;
-//        case WHEEL_T_SFW:
-//          out_sfw_report.gasPedal = external_gas_value;
-//          out_sfw_report.brakePedal = external_brake_value;
-//          break;
-//      }
-//      
-//      external_pedals_values = (external_brake_value << 8) | external_gas_value;
-//    }
+
   #endif
 
   // input report was updated?
@@ -951,40 +773,40 @@ void loop() {
 
   // map generic_output to the output_mode
   if (report_was_updated)
-    map_output();
+    map_output(output_mode, generic_report, &output_report );
 
   // send hid report to host
   if (report_was_updated && usb_hid.ready()) {
     switch (output_mode) {
       case WHEEL_T_FGP:
-        usb_hid.sendReport(0, &out_fgp_report, sizeof(out_fgp_report));
+        usb_hid.sendReport(0, &output_report.report.fgp, sizeof(output_report.report.fgp));
         break;
       case WHEEL_T_FFGP:
-        usb_hid.sendReport(0, &out_ffgp_report, sizeof(out_ffgp_report));
+        usb_hid.sendReport(0, &output_report.report.ffgp, sizeof(output_report.report.ffgp));
         break;
       case WHEEL_T_DF:
-        usb_hid.sendReport(0, &out_df_report, sizeof(out_df_report));
+        usb_hid.sendReport(0, &output_report.report.df, sizeof(output_report.report.df));
         break;
       case WHEEL_T_DFP:
-        usb_hid.sendReport(0, &out_dfp_report, sizeof(out_dfp_report));
+        usb_hid.sendReport(0, &output_report.report.dfp, sizeof(output_report.report.dfp));
         break;
       case WHEEL_T_DFGT:
-        usb_hid.sendReport(0, &out_dfgt_report, sizeof(out_dfgt_report));
+        usb_hid.sendReport(0, &output_report.report.dfgt, sizeof(output_report.report.dfgt));
         break;
       case WHEEL_T_G25:
-        usb_hid.sendReport(0, &out_g25_report, sizeof(out_g25_report));
+        usb_hid.sendReport(0, &output_report.report.g25, sizeof(output_report.report.g25));
         break;
       case WHEEL_T_G27:
-        usb_hid.sendReport(0, &out_g27_report, sizeof(out_g27_report));
+        usb_hid.sendReport(0, &output_report.report.g27, sizeof(output_report.report.g27));
         break;
       case WHEEL_T_MOMOFO:
-        usb_hid.sendReport(0, &out_momofo_report, sizeof(out_momofo_report));
+        usb_hid.sendReport(0, &output_report.report.momofo, sizeof(output_report.report.momofo));
         break;
       case WHEEL_T_MOMORA:
-          usb_hid.sendReport(0, &out_momora_report, sizeof(out_momora_report));
+          usb_hid.sendReport(0, &output_report.report.momora, sizeof(output_report.report.momora));
         break;
       case WHEEL_T_SFW:
-        usb_hid.sendReport(0, &out_sfw_report, sizeof(out_sfw_report));
+        usb_hid.sendReport(0, &output_report.report.sfw, sizeof(output_report.report.sfw));
         break;
     }
   }
@@ -996,781 +818,11 @@ void loop() {
     }
     memcpy(last_cmd_buffer, cmd_buffer, sizeof(cmd_buffer));
   }
-
-  //leds
-  #ifdef BOARD_RGB_PIN
-    static uint8_t last_leds = 0;
-    if(last_leds != leds_buffer) {
-      if (leds_buffer & (1<<4))
-        ledStrip.fill( WS2812::RGB(60, 00, 0) );
-      else if (leds_buffer & (1<<3))
-        ledStrip.fill( WS2812::RGB(60, 50, 0) );
-      else if (leds_buffer & (1<<2))
-        ledStrip.fill( WS2812::RGB(40, 30, 0) );
-      else if (leds_buffer & (1<<1))
-        ledStrip.fill( WS2812::RGB(10, 40, 0) );
-      else if (leds_buffer & 1)
-        ledStrip.fill( WS2812::RGB(0, 20, 0) );
-      else
-        ledStrip.fill( WS2812::RGB(0, 0, 0) );
-      last_leds = leds_buffer;
-      ledStrip.show();
-    }
-  #endif
-
-}
-
-void map_input(uint8_t const* report) {
-  uint16_t vid, pid;
-  tuh_vid_pid_get(wheel_addr, &vid, &pid);
-
-  if (pid == pid_df) { // Driving Force. most logitech wheels will start in this mode
-
-    // map the received report to the generic report
-    df_report_t* input_report = (df_report_t*)report;
-
-    generic_report.wheel_precision = wheel_10bits;
-    generic_report.pedals_precision_16bits = false;
-
-    generic_report.wheel_10 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-
-    generic_report.hat = input_report->hat;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;      
-    generic_report.R2 = input_report->R2;
-    generic_report.L2 = input_report->L2;
-    generic_report.R3 = input_report->R3;
-    generic_report.L3 = input_report->L3;
-    generic_report.select = input_report->select;
-    generic_report.start = input_report->start;
-
-  } else if (pid == pid_dfp) { // Driving Force Pro UNTESTED
-    
-    // map the received report to the generic report
-    dfp_report_t* input_report = (dfp_report_t*)report;
-    
-    generic_report.wheel_precision = wheel_14bits;
-    generic_report.pedals_precision_16bits = false;
-    
-    generic_report.wheel_14 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-
-    generic_report.hat = input_report->hat;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;
-    generic_report.R2 = input_report->R2;
-    generic_report.L2 = input_report->L2;
-    generic_report.R3 = input_report->R3;
-    generic_report.L3 = input_report->L3;
-    generic_report.select = input_report->select;
-    generic_report.start = input_report->start;
-    generic_report.gear_minus = input_report->gear_minus;
-    generic_report.gear_plus = input_report->gear_plus;
-
-  } else if (pid == pid_dfgt) { // Driving Force GT
-
-    // map the received report to the generic report
-    dfgt_report_t* input_report = (dfgt_report_t*)report;
-
-    generic_report.wheel_precision = wheel_14bits;
-    generic_report.pedals_precision_16bits = false;
-    
-    generic_report.wheel_14 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-
-    generic_report.hat = input_report->hat;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;
-    generic_report.R2 = input_report->R2;
-    generic_report.L2 = input_report->L2;
-    generic_report.R3 = input_report->R3;
-    generic_report.L3 = input_report->L3;
-    generic_report.select = input_report->select;
-    generic_report.start = input_report->start;
-    generic_report.gear_minus = input_report->gear_minus;
-    generic_report.gear_plus = input_report->gear_plus;
-    generic_report.dial_cw = input_report->dial_cw;
-    generic_report.dial_ccw = input_report->dial_ccw;
-    generic_report.enter = input_report->enter;
-    generic_report.plus = input_report->plus;
-    generic_report.minus = input_report->minus;
-    generic_report.horn = input_report->horn;
-    generic_report.PS = input_report->PS;
-
-  } else if (pid == pid_g25) { // G25
-
-    // map the received report to output report
-    g25_report_t* input_report = (g25_report_t*)report;
-
-    generic_report.wheel_precision = wheel_14bits;
-    generic_report.pedals_precision_16bits = false;
-    
-    generic_report.wheel_14 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-    generic_report.clutchPedal_8 = input_report->clutchPedal;
-
-    generic_report.hat = input_report->hat;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;
-    generic_report.R2 = input_report->R2;
-    generic_report.L2 = input_report->L2;
-    generic_report.R3 = input_report->R3;
-    generic_report.L3 = input_report->L3;
-    generic_report.select = input_report->select;
-    generic_report.start = input_report->start;
-    generic_report.shifter_x = input_report->shifter_x;
-    generic_report.shifter_y = input_report->shifter_y;
-    generic_report.shifter_1 = input_report->shifter_1;
-    generic_report.shifter_2 = input_report->shifter_2;
-    generic_report.shifter_3 = input_report->shifter_3;
-    generic_report.shifter_4 = input_report->shifter_4;
-    generic_report.shifter_5 = input_report->shifter_5;
-    generic_report.shifter_6 = input_report->shifter_6;
-    generic_report.shifter_r = input_report->shifter_r;
-    generic_report.shifter_stick_down = input_report->shifter_stick_down;
-    
-  } else if (pid == pid_g27) { // G27
-
-    // map the received report to output report
-    g27_report_t* input_report = (g27_report_t*)report;
-
-    generic_report.wheel_precision = wheel_14bits;
-    generic_report.pedals_precision_16bits = false;
-    
-    generic_report.wheel_14 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-    generic_report.clutchPedal_8 = input_report->clutchPedal;
-
-    generic_report.hat = input_report->hat;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;
-    generic_report.R2 = input_report->R2;
-    generic_report.L2 = input_report->L2;
-    generic_report.R3 = input_report->R3;
-    generic_report.L3 = input_report->L3;
-    generic_report.R4 = input_report->R4;
-    generic_report.L4 = input_report->L4;
-    generic_report.R5 = input_report->R5;
-    generic_report.L5 = input_report->L5;
-    generic_report.select = input_report->select;
-    generic_report.start = input_report->start;
-    generic_report.shifter_x = input_report->shifter_x;
-    generic_report.shifter_y = input_report->shifter_y;
-    generic_report.shifter_1 = input_report->shifter_1;
-    generic_report.shifter_2 = input_report->shifter_2;
-    generic_report.shifter_3 = input_report->shifter_3;
-    generic_report.shifter_4 = input_report->shifter_4;
-    generic_report.shifter_5 = input_report->shifter_5;
-    generic_report.shifter_6 = input_report->shifter_6;
-    generic_report.shifter_r = input_report->shifter_r;
-    generic_report.shifter_stick_down = input_report->shifter_stick_down;
-
-  } else if (pid == pid_g29 || pid == pid_g923) { // G29 or G923
-
-    // map the received report to output report
-    g29_report_t* input_report = (g29_report_t*)report;
-
-    generic_report.wheel_precision = wheel_16bits;
-    generic_report.pedals_precision_16bits = false;
-
-    generic_report.wheel_16 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-    generic_report.clutchPedal_8 = input_report->clutchPedal;
-
-    generic_report.hat = input_report->hat;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;
-    generic_report.R2 = input_report->R2;
-    generic_report.L2 = input_report->L2;
-    generic_report.select = input_report->share;
-    generic_report.start = input_report->options;
-    generic_report.R3 = input_report->R3;
-    generic_report.L3 = input_report->L3;
-    generic_report.shifter_1 = input_report->shifter_1;
-    generic_report.shifter_2 = input_report->shifter_2;
-    generic_report.shifter_3 = input_report->shifter_3;
-    generic_report.shifter_4 = input_report->shifter_4;
-    generic_report.shifter_5 = input_report->shifter_5;
-    generic_report.shifter_6 = input_report->shifter_6;
-    generic_report.shifter_r = input_report->shifter_r;
-    generic_report.plus = input_report->plus;
-    generic_report.minus = input_report->minus;
-    generic_report.dial_cw = input_report->dial_cw;
-    generic_report.dial_ccw = input_report->dial_ccw;
-    generic_report.enter = input_report->enter;
-    generic_report.PS = input_report->PS;
-    generic_report.shifter_x = input_report->shifter_x;
-    generic_report.shifter_y = input_report->shifter_y;
-    generic_report.shifter_stick_down = input_report->shifter_stick_down;
-
-  } else if (pid == pid_fgp) { // Formula GP
-
-    // map the received report to output report
-    fgp_report_t* input_report = (fgp_report_t*)report;
-
-    generic_report.wheel_precision = wheel_8bits;
-    generic_report.pedals_precision_16bits = false;
-    
-    generic_report.wheel_8 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-
-    generic_report.hat = 0x8;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;
-
-  } else if (pid == pid_ffgp) { // Formula Force GP
-
-    // map the received report to output report
-    ffgp_report_t* input_report = (ffgp_report_t*)report;
-
-    generic_report.wheel_precision = wheel_10bits;
-    generic_report.pedals_precision_16bits = false;
-    
-    generic_report.wheel_10 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-
-    generic_report.hat = 0x8;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;
-    
-  } else if (pid == pid_momofo) { // Momo Force
-
-    // map the received report to output report
-    momofo_report_t* input_report = (momofo_report_t*)report;
-
-    generic_report.wheel_precision = wheel_8bits;
-    generic_report.pedals_precision_16bits = false;
-    
-    generic_report.wheel_8 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = ~input_report->brakePedal;
-
-    generic_report.hat = 0x8;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;
-    generic_report.select = input_report->select;
-    generic_report.start = input_report->start;
-    
-  } else if (pid == pid_momora) { // Momo Racing
-
-    // map the received report to output report
-    momora_report_t* input_report = (momora_report_t*)report;
-
-    generic_report.wheel_precision = wheel_8bits;
-    generic_report.pedals_precision_16bits = false;
-    
-    generic_report.wheel_8 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-
-    generic_report.hat = 0x8;
-    generic_report.cross = input_report->cross;
-    generic_report.square = input_report->square;
-    generic_report.circle = input_report->circle;
-    generic_report.triangle = input_report->triangle;
-    generic_report.R1 = input_report->R1;
-    generic_report.L1 = input_report->L1;
-    generic_report.select = input_report->select;
-    generic_report.start = input_report->start;
-    generic_report.gear_minus = input_report->gear_minus;
-    generic_report.gear_plus = input_report->gear_plus;
-    
-  } else if (pid == pid_sfw) { // Speed Force Wireless
-
-    // map the received report to output report
-    sfw_report_t* input_report = (sfw_report_t*)report;
-
-    generic_report.wheel_precision = wheel_10bits;
-    generic_report.pedals_precision_16bits = false;
-
-    if (input_report->hat_u) {
-      if (input_report->hat_l)
-        generic_report.hat = 0x7;
-      else if (input_report->hat_r)
-        generic_report.hat = 0x1;
-      else
-        generic_report.hat = 0x0;
-    } else if (input_report->hat_d) {
-      if (input_report->hat_l)
-        generic_report.hat = 0x5;
-      else if (input_report->hat_r)
-        generic_report.hat = 0x3;
-      else
-        generic_report.hat = 0x4;
-    } else if (input_report->hat_l) {
-      generic_report.hat = 0x6;
-    } else if (input_report->hat_r) {
-      generic_report.hat = 0x2;
-    } else {
-      generic_report.hat = 0x8;
-    }
-    
-    generic_report.wheel_10 = input_report->wheel;
-    generic_report.gasPedal_8 = input_report->gasPedal;
-    generic_report.brakePedal_8 = input_report->brakePedal;
-    
-    generic_report.cross = input_report->b;
-    generic_report.square = input_report->one;
-    generic_report.circle = input_report->a;
-    generic_report.triangle = input_report->two;
-    generic_report.select = input_report->minus;
-    generic_report.start = input_report->plus;
-    generic_report.PS = input_report->home;
-
-    // if using external pedals, reuse the analog paddles as L1/R1
-    #ifdef EXTERNAL_PEDAL_TYPE
-      generic_report.R1 = input_report->gasPedal < 127;
-      generic_report.L1 = input_report->brakePedal < 127;
-    #endif
-    
-  }
-
-}
-
-void map_output() {
-  // shift axis values
-  const bool pedals_output_precision_16bits = false;
-  uint8_t wheel_output_precision;
-
-  switch (output_mode) {
-    case WHEEL_T_FGP:
-    case WHEEL_T_MOMOFO:
-      wheel_output_precision = wheel_8bits;
-      break;
-    case WHEEL_T_FFGP:
-    case WHEEL_T_DF:
-    case WHEEL_T_SFW:
-    case WHEEL_T_MOMORA:
-      wheel_output_precision = wheel_10bits;
-      break;
-    case WHEEL_T_DFP:
-    case WHEEL_T_DFGT:
-    case WHEEL_T_G25:
-    case WHEEL_T_G27:
-      wheel_output_precision = wheel_14bits;
-      break;
-    default:
-      wheel_output_precision = wheel_14bits;
-      break;
-  }
-
-  uint16_t wheel;
-  uint16_t gas;
-  uint16_t brake;
-  uint16_t clutch;
-
-  if (wheel_output_precision == generic_report.wheel_precision) { // no conversion
-    if (generic_report.wheel_precision == wheel_8bits) {
-      wheel = generic_report.wheel_8;
-    } else if (generic_report.wheel_precision == wheel_10bits) {
-      wheel = generic_report.wheel_10;
-    } else if (generic_report.wheel_precision == wheel_14bits) {
-      wheel = generic_report.wheel_14;
-    } else if (generic_report.wheel_precision == wheel_16bits) {
-      wheel = generic_report.wheel_16;
-    }
-  } else if (generic_report.wheel_precision == wheel_8bits) {
-    if (wheel_output_precision == wheel_10bits) {
-      wheel = generic_report.wheel_8 << 2;
-    } else if (wheel_output_precision == wheel_14bits) {
-      wheel = generic_report.wheel_8 << 4;
-    } else if (wheel_output_precision == wheel_16bits) {
-      wheel = generic_report.wheel_8 << 6;
-    }
-  } else if (generic_report.wheel_precision == wheel_10bits) {
-    if (wheel_output_precision == wheel_8bits) {
-      wheel = generic_report.wheel_10 >> 2;
-    } else if (wheel_output_precision == wheel_14bits) {
-      wheel = generic_report.wheel_10 << 4;
-    } else if (wheel_output_precision == wheel_16bits) {
-      wheel = generic_report.wheel_10 << 6;
-    }
-  } else if (generic_report.wheel_precision == wheel_14bits) {
-    if (wheel_output_precision == wheel_8bits) {
-      wheel = generic_report.wheel_14 >> 6;
-    }else if (wheel_output_precision == wheel_10bits) {
-      wheel = generic_report.wheel_14 >> 4;
-    } else if (wheel_output_precision == wheel_16bits) {
-      wheel = generic_report.wheel_14 << 2;
-    }
-  } else if (generic_report.wheel_precision == wheel_16bits) {
-    if (wheel_output_precision == wheel_8bits) {
-      wheel = generic_report.wheel_16 >> 8;
-    } else if (wheel_output_precision == wheel_10bits) {
-      wheel = generic_report.wheel_16 >> 6;
-    } else if (wheel_output_precision == wheel_14bits) {
-      wheel = generic_report.wheel_16 >> 2;
-    }
-  }
-
-  //if using external pedals, override input.
-  #ifdef EXTERNAL_PEDAL_TYPE
-    generic_report.pedals_precision_16bits = false;
-    generic_report.gasPedal_8 = external_pedals_values & 0xFF;
-    generic_report.brakePedal_8 = (external_pedals_values >> 8) & 0xFF;
-  #endif
-
-  if (pedals_output_precision_16bits == generic_report.pedals_precision_16bits) { // no conversion
-    if (generic_report.pedals_precision_16bits) {
-      gas = generic_report.gasPedal_16;
-      brake = generic_report.brakePedal_16;
-      clutch = generic_report.clutchPedal_16;
-    } else {
-      gas = generic_report.gasPedal_8;
-      brake = generic_report.brakePedal_8;
-      clutch = generic_report.clutchPedal_8;
-    }
-  } else if (pedals_output_precision_16bits && !generic_report.pedals_precision_16bits) {
-      gas = generic_report.gasPedal_8 << 8;
-      brake = generic_report.brakePedal_8 << 8;
-      clutch = generic_report.clutchPedal_8 << 8;
-  } else if (!pedals_output_precision_16bits && generic_report.pedals_precision_16bits) {
-      gas = generic_report.gasPedal_16 >> 8;
-      brake = generic_report.brakePedal_16 >> 8;
-      clutch = generic_report.clutchPedal_16 >> 8;
-  }
-
-  switch (output_mode) {
-    case WHEEL_T_FGP:
-      map_fgp_out(wheel, gas, brake, clutch);
-      break;
-    case WHEEL_T_FFGP:
-      map_ffgp_out(wheel, gas, brake, clutch);
-      break;
-    case WHEEL_T_DF:
-      map_df_out(wheel, gas, brake, clutch);
-      break;
-    case WHEEL_T_DFP:
-      map_dfp_out(wheel, gas, brake, clutch);
-      break;
-    case WHEEL_T_DFGT:
-      map_dfgt_out(wheel, gas, brake, clutch);
-      break;
-    case WHEEL_T_G25:
-      map_g25_out(wheel, gas, brake, clutch);
-      break;
-    case WHEEL_T_G27:
-      map_g27_out(wheel, gas, brake, clutch);
-      break;
-    case WHEEL_T_MOMOFO:
-      map_momofo_out(wheel, gas, brake, clutch);
-      break;
-    case WHEEL_T_MOMORA:
-      map_momora_out(wheel, gas, brake, clutch);
-      break;
-    case WHEEL_T_SFW:
-      map_sfw_out(wheel, gas, brake, clutch);
-  }
-}
-
-void map_fgp_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_fgp_report.wheel = wheel;
-  out_fgp_report.gasPedal = gas;
-  out_fgp_report.brakePedal = brake;
-  out_fgp_report.cross = generic_report.cross;
-  out_fgp_report.square = generic_report.square;
-  out_fgp_report.circle = generic_report.circle;
-  out_fgp_report.triangle = generic_report.triangle;
-  out_fgp_report.R1 = generic_report.R1;
-  out_fgp_report.L1 = generic_report.L1;
-
-  //combined pedals. mid: 0x7F. gas pulls to 0x0, brake pulls to 0xFF;
-  out_fgp_report.pedals = (~(out_fgp_report.brakePedal>>1) - ~(out_fgp_report.gasPedal>>1)) + 0x7f;
-}
-
-void map_ffgp_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_ffgp_report.wheel = wheel;
-  out_ffgp_report.gasPedal = gas;
-  out_ffgp_report.brakePedal = brake;
-  out_ffgp_report.cross = generic_report.cross;
-  out_ffgp_report.square = generic_report.square;
-  out_ffgp_report.circle = generic_report.circle;
-  out_ffgp_report.triangle = generic_report.triangle;
-  out_ffgp_report.R1 = generic_report.R1;
-  out_ffgp_report.L1 = generic_report.L1;
-
-  //combined pedals. mid: 0x7F. gas pulls to 0x0, brake pulls to 0xFF;
-  out_ffgp_report.pedals = (~(out_ffgp_report.brakePedal>>1) - ~(out_ffgp_report.gasPedal>>1)) + 0x7f;
-}
-
-void map_df_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_df_report.wheel = wheel;
-  out_df_report.gasPedal = gas;
-  out_df_report.brakePedal = brake;
-  out_df_report.cross = generic_report.cross;
-  out_df_report.square = generic_report.square;
-  out_df_report.circle = generic_report.circle;
-  out_df_report.triangle = generic_report.triangle;
-  out_df_report.R1 = generic_report.R1;
-  out_df_report.L1 = generic_report.L1;
-
-  out_df_report.hat = generic_report.hat;
-  out_df_report.R2 = generic_report.R2;
-  out_df_report.L2 = generic_report.L2;
-  out_df_report.select = generic_report.select;
-  out_df_report.start = generic_report.start;
-  out_df_report.R3 = generic_report.R3;
-  out_df_report.L3 = generic_report.L3;
-
-  //combined pedals. mid: 0x7F. gas pulls to 0x0, brake pulls to 0xFF;
-  out_df_report.pedals = (~(out_df_report.brakePedal>>1) - ~(out_df_report.gasPedal>>1)) + 0x7f;
-}
-
-void map_dfp_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_dfp_report.wheel = wheel;
-  out_dfp_report.gasPedal = gas;
-  out_dfp_report.brakePedal = brake;
-  out_dfp_report.cross = generic_report.cross;
-  out_dfp_report.square = generic_report.square;
-  out_dfp_report.circle = generic_report.circle;
-  out_dfp_report.triangle = generic_report.triangle;
-  out_dfp_report.R1 = generic_report.R1;
-  out_dfp_report.L1 = generic_report.L1;
-
-  out_dfp_report.hat = generic_report.hat;
-  out_dfp_report.R2 = generic_report.R2;
-  out_dfp_report.L2 = generic_report.L2;
-  out_dfp_report.select = generic_report.select;
-  out_dfp_report.start = generic_report.start;
-  out_dfp_report.R3 = generic_report.R3;
-  out_dfp_report.L3 = generic_report.L3;
-
-  //combined pedals. mid: 0x7F. gas pulls to 0x0, brake pulls to 0xFF;
-  out_dfp_report.pedals = (~(out_dfp_report.brakePedal>>1) - ~(out_dfp_report.gasPedal>>1)) + 0x7f;
-
-  out_dfp_report.gear_minus = generic_report.gear_minus;
-  out_dfp_report.gear_plus = generic_report.gear_plus;
-}
-
-void map_dfgt_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_dfgt_report.wheel = wheel;
-  out_dfgt_report.gasPedal = gas;
-  out_dfgt_report.brakePedal = brake;
-  out_dfgt_report.cross = generic_report.cross;
-  out_dfgt_report.square = generic_report.square;
-  out_dfgt_report.circle = generic_report.circle;
-  out_dfgt_report.triangle = generic_report.triangle;
-  out_dfgt_report.R1 = generic_report.R1;
-  out_dfgt_report.L1 = generic_report.L1;
-
-  out_dfgt_report.hat = generic_report.hat;
-  out_dfgt_report.R2 = generic_report.R2;
-  out_dfgt_report.L2 = generic_report.L2;
-  out_dfgt_report.select = generic_report.select;
-  out_dfgt_report.start = generic_report.start;
-  out_dfgt_report.R3 = generic_report.R3;
-  out_dfgt_report.L3 = generic_report.L3;
-
-  out_dfgt_report.gear_minus = generic_report.gear_minus;
-  out_dfgt_report.gear_plus = generic_report.gear_plus;
-
-  out_dfgt_report.enter = generic_report.enter;
-  out_dfgt_report.plus = generic_report.plus;
-  out_dfgt_report.dial_cw = generic_report.dial_cw;
-  out_dfgt_report.dial_ccw = generic_report.dial_ccw;
-  out_dfgt_report.minus = generic_report.minus;
-  out_dfgt_report.horn = generic_report.horn;
-  out_dfgt_report.PS = generic_report.PS;
-}
-
-void map_g25_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_g25_report.wheel = wheel;
-  out_g25_report.gasPedal = gas;
-  out_g25_report.brakePedal = brake;
-  out_g25_report.cross = generic_report.cross;
-  out_g25_report.square = generic_report.square;
-  out_g25_report.circle = generic_report.circle;
-  out_g25_report.triangle = generic_report.triangle;
-  out_g25_report.R1 = generic_report.R1;
-  out_g25_report.L1 = generic_report.L1;
-
-  out_g25_report.hat = generic_report.hat;
-  out_g25_report.R2 = generic_report.R2;
-  out_g25_report.L2 = generic_report.L2;
-  out_g25_report.select = generic_report.select;
-  out_g25_report.start = generic_report.start;
-  out_g25_report.R3 = generic_report.R3;
-  out_g25_report.L3 = generic_report.L3;
-
-  out_g25_report.clutchPedal = clutch;
-  out_g25_report.shifter_x = generic_report.shifter_x;
-  out_g25_report.shifter_y = generic_report.shifter_y;
-  out_g25_report.shifter_1 = generic_report.shifter_1;
-  out_g25_report.shifter_2 = generic_report.shifter_2;
-  out_g25_report.shifter_3 = generic_report.shifter_3;
-  out_g25_report.shifter_4 = generic_report.shifter_4;
-  out_g25_report.shifter_5 = generic_report.shifter_5;
-  out_g25_report.shifter_6 = generic_report.shifter_6;
-  out_g25_report.shifter_r = generic_report.shifter_r;
-  out_g25_report.shifter_stick_down = generic_report.shifter_stick_down;
-}
-
-void map_g27_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_g27_report.wheel = wheel;
-  out_g27_report.gasPedal = gas;
-  out_g27_report.brakePedal = brake;
-  out_g27_report.cross = generic_report.cross;
-  out_g27_report.square = generic_report.square;
-  out_g27_report.circle = generic_report.circle;
-  out_g27_report.triangle = generic_report.triangle;
-  out_g27_report.R1 = generic_report.R1;
-  out_g27_report.L1 = generic_report.L1;
-
-  out_g27_report.hat = generic_report.hat;
-  out_g27_report.R2 = generic_report.R2;
-  out_g27_report.L2 = generic_report.L2;
-  out_g27_report.select = generic_report.select;
-  out_g27_report.start = generic_report.start;
-  out_g27_report.R3 = generic_report.R3;
-  out_g27_report.L3 = generic_report.L3;
-
-  out_g27_report.R4 = generic_report.R4;
-  out_g27_report.L4 = generic_report.L4;
-  out_g27_report.R5 = generic_report.R5;
-  out_g27_report.L5 = generic_report.L5;
   
-  out_g27_report.clutchPedal = clutch;
-  out_g27_report.shifter_x = generic_report.shifter_x;
-  out_g27_report.shifter_y = generic_report.shifter_y;
-  out_g27_report.shifter_1 = generic_report.shifter_1;
-  out_g27_report.shifter_2 = generic_report.shifter_2;
-  out_g27_report.shifter_3 = generic_report.shifter_3;
-  out_g27_report.shifter_4 = generic_report.shifter_4;
-  out_g27_report.shifter_5 = generic_report.shifter_5;
-  out_g27_report.shifter_6 = generic_report.shifter_6;
-  out_g27_report.shifter_r = generic_report.shifter_r;
-  out_g27_report.shifter_stick_down = generic_report.shifter_stick_down;
+  update_led_strip(leds_buffer);
+
 }
 
-void map_momofo_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_momofo_report.wheel = wheel;
-  out_momofo_report.gasPedal = gas;
-  out_momofo_report.brakePedal = ~brake; // this is correct?
-  out_momofo_report.cross = generic_report.cross;
-  out_momofo_report.square = generic_report.square;
-  out_momofo_report.circle = generic_report.circle;
-  out_momofo_report.triangle = generic_report.triangle;
-  out_momofo_report.R1 = generic_report.R1;
-  out_momofo_report.L1 = generic_report.L1;
-  out_momofo_report.select = generic_report.select;
-  out_momofo_report.start = generic_report.start;
 
-  //combined pedals. mid: 0x7F. gas pulls to 0x0, brake pulls to 0xFF;
-  //out_momofo_report.pedals = (~(out_momofo_report.brakePedal>>1) - ~(out_momofo_report.gasPedal>>1)) + 0x7f;
-}
 
-void map_momora_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_momora_report.wheel = wheel;
-  out_momora_report.gasPedal = gas;
-  out_momora_report.brakePedal = brake; // this is correct?
-  out_momora_report.cross = generic_report.cross;
-  out_momora_report.square = generic_report.square;
-  out_momora_report.circle = generic_report.circle;
-  out_momora_report.triangle = generic_report.triangle;
-  out_momora_report.R1 = generic_report.R1;
-  out_momora_report.L1 = generic_report.L1;
-  out_momora_report.select = generic_report.select;
-  out_momora_report.start = generic_report.start;
 
-  out_dfgt_report.gear_minus = generic_report.gear_minus;
-  out_dfgt_report.gear_plus = generic_report.gear_plus;
-
-  //combined pedals. mid: 0x7F. gas pulls to 0x0, brake pulls to 0xFF;
-  //out_momora_report.pedals = (~(out_momora_report.brakePedal>>1) - ~(out_momora_report.gasPedal>>1)) + 0x7f;
-}
-
-void map_sfw_out(uint16_t wheel, uint16_t gas, uint16_t brake, uint16_t clutch) {
-  out_sfw_report.wheel = wheel;
-  out_sfw_report.gasPedal = gas;
-  out_sfw_report.brakePedal = brake;
-  out_sfw_report.b = generic_report.cross;
-  out_sfw_report.one = generic_report.square;
-  out_sfw_report.a = generic_report.circle;
-  out_sfw_report.two = generic_report.triangle;
-
-  out_sfw_report.hat_u = 0;
-  out_sfw_report.hat_d = 0;
-  out_sfw_report.hat_l = 0;
-  out_sfw_report.hat_r = 0;
-  switch (generic_report.hat) {
-    case 0x0:
-      out_sfw_report.hat_u = 1;
-      break;
-    case 0x1:
-      out_sfw_report.hat_u = 1;
-      out_sfw_report.hat_r = 1;
-      break;
-    case 0x2:
-      out_sfw_report.hat_r = 1;
-      break;
-    case 0x3:
-      out_sfw_report.hat_d = 1;
-      out_sfw_report.hat_r = 1;
-      break;
-    case 0x4:
-      out_sfw_report.hat_d = 1;
-      break;
-    case 0x5:
-      out_sfw_report.hat_d = 1;
-      out_sfw_report.hat_l = 1;
-      break;
-    case 0x6:
-      out_sfw_report.hat_l = 1;
-      break;
-    case 0x7:
-      out_sfw_report.hat_u = 1;
-      out_sfw_report.hat_l = 1;
-      break;
-    default:
-      break;
-  }
-
-  out_sfw_report.minus = generic_report.select;
-  out_sfw_report.plus = generic_report.start;
-  out_sfw_report.home = generic_report.PS;
-}

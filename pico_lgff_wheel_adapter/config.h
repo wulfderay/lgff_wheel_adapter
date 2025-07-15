@@ -1,4 +1,6 @@
 #pragma once
+#include <stdint.h>
+#include "enums.h"
 
 /*******************************************************************************
  * Required config
@@ -7,6 +9,10 @@
 // USB D+ pin
 #define PIN_USB_HOST_DP 0
 
+#define LEDS_EXTRA
+#define WHEEL_T_DEFAULT WHEEL_T_FFGP
+
+#define STEERING_CENTER_DAMPEN 3.0  
 // disable initial wheel auto-center
 // most (all) logitech wheels starts with auto-centering enabled
 // this will send a command to disable it during device start up process
@@ -15,11 +21,11 @@
 // enable automatic mode switch.
 // device will start in Driving Force compatibility mode (as most logitech wheels does)
 // only works with output_mode: WHEEL_T_DFP, WHEEL_T_DFGT, WHEEL_T_G25, WHEEL_T_G27
-const bool auto_mode = true;
+const bool auto_mode = false;
 
 // emulated output wheel type
 // possible modes: WHEEL_T_FFGP, WHEEL_T_DF, WHEEL_T_DFP, WHEEL_T_DFGT, WHEEL_T_G25, WHEEL_T_G27, WHEEL_T_SFW
-lg_wheel_output_type output_mode = WHEEL_T_G27;
+extern lg_wheel_output_type output_mode;
 
 // force input wheel into specific compatibility mode
 // possible modes: NATIVE, AUTO, DF, DFP, DFGT, G25, G27, G29, G923.

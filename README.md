@@ -1,5 +1,6 @@
 # Note:
-I am not the original author, that is https://github.com/sonik-br
+I am not the original author, that is https://github.com/sonik-br.
+
 Please give all credit, money and love to them!
 
 # lgff_wheel_adapter
